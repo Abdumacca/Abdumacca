@@ -1,17 +1,24 @@
 # 🌴 Zanzibar Trip Tracker
 
-A minimal Polarsteps-style travel tracker — a single HTML file, no backend, no account.
-All data (steps, photos, GPS trail) is stored **on your phone** in the browser's local storage.
+A minimal Polarsteps-style travel tracker — a small PWA, no backend, no account.
+All data (steps, photos, GPS trail) is stored **on your phone** in IndexedDB.
 
 ## Features
 
 - 🗺 Full-screen map centered on Zanzibar (OpenStreetMap)
-- 📍 **Track** button records your GPS trail while the tab is open (points logged every ~30 m)
+- 📱 **Installable PWA** — add to home screen, opens full-screen like a native app
+- ✈️ **Works offline** — the app shell and every map area you've viewed are cached
+  on the device, so patchy island data is fine
+- 📍 **Track** button records your GPS trail (points logged every ~30 m) and keeps
+  the screen awake while tracking so recording doesn't stop
 - ➕ Add **steps** (stops) with a title, date, notes, and photos — pinned to your current GPS position or the map center
 - 🧵 Route line drawn through your steps, dashed line for the raw GPS trail
+- ▶️ **Relive trip** — the map flies through your steps in order
 - 📖 Swipe-up timeline with numbered step cards and photo lightbox
 - 📊 Trip stats: steps, kilometers, days, photos
 - 💾 Export / import a JSON backup (photos included) from the ⋯ menu
+- 🗄 Photos live in IndexedDB (hundreds of MB), not the old 5 MB localStorage cap;
+  data from the first version migrates automatically
 
 ## How to use it
 
@@ -23,11 +30,16 @@ All data (steps, photos, GPS trail) is stored **on your phone** in the browser's
 4. At each stop, tap **＋**, add a title/photos/notes, and save.
 5. Before leaving Zanzibar, use **⋯ → Export backup** to save your trip as a file.
 
+## Tips for offline use
+
+Before you lose signal, open the app and pan/zoom around the areas you'll visit
+(Stone Town, the coasts, your hotel area) — those map tiles are then cached and
+available offline.
+
 ## Limitations (it's a *minimum* version 🙂)
 
-- Tracking only runs while the browser tab is open and awake — phones suspend
-  background tabs, so it won't record all day like the native Polarsteps app.
-  Tip: tap Track when you're on the move, or just rely on adding steps at each stop.
-- Photos are compressed and stored in localStorage (~5 MB), good for roughly
-  30–50 photos. Export a backup if you get a storage warning.
+- Tracking runs while the app is open in the foreground (it now keeps the screen
+  awake, but it still won't record with the phone in your pocket all day like the
+  native Polarsteps app). Tip: tap Track when you're on the move, or just rely on
+  adding steps at each stop.
 - Data lives in one browser on one device; use export/import to move it.
