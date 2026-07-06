@@ -224,6 +224,7 @@
   <button onclick="document.getElementById('importFile').click(); toggleMenu()">⬆️ Import backup</button>
   <button onclick="fitTrip(); toggleMenu()">🗺 Fit map to trip</button>
   <button onclick="relive()">▶️ Relive trip</button>
+  <button onclick="shareTrip()">📤 Share trip story</button>
   <button onclick="clearTrack()">🧹 Clear GPS trail</button>
 </div>
 <input type="file" id="importFile" accept=".json,application/json" style="display:none" onchange="importTrip(this)">
@@ -265,6 +266,7 @@
       <div class="loc-row">
         <button class="loc-btn sel" id="locGps" onclick="setLocMode('gps')">📍 Current GPS</button>
         <button class="loc-btn" id="locMap" onclick="setLocMode('map')">🎯 Map center</button>
+        <button class="loc-btn" id="locPhoto" onclick="setLocMode('photo')" style="display:none">📷 Photo</button>
       </div>
     </div>
     <div class="field">
@@ -386,7 +388,7 @@ function render() {
     <div class="step-card">
       <div class="num">${i + 1}</div>
       <h3>${esc(s.title)}</h3>
-      <div class="date">${fmtDate(s.date)}</div>
+      <div class="date">${fmtDate(s.date)}${s.weather ? ` · ${s.weather.icon} ${s.weather.tmax}°C · 🌇 ${s.weather.sunset}` : ""}</div>
       ${s.notes ? `<div class="notes">${esc(s.notes)}</div>` : ""}
       ${s.photos.length ? `<div class="photos">${s.photos.map((p, j) =>
         `<img src="${p}" loading="lazy" alt="" onclick="openLightbox('${s.id}',${j})">`).join("")}</div>` : ""}
@@ -432,6 +434,8 @@ function openStepModal(id) {
   document.getElementById("fNotes").value = s ? s.notes : "";
   document.getElementById("fDate").value = (s ? s.date : nowLocal()).slice(0, 16);
   pendingPhotos = s ? [...s.photos] : [];
+  pendingExif = null;
+  document.getElementById("locPhoto").style.display = "none";
   setLocMode(s ? "keep" : "gps");
   renderPhotoPreviews();
   document.getElementById("stepModalWrap").classList.add("open");
@@ -442,7 +446,8 @@ function setLocMode(m) {
   locMode = m;
   document.getElementById("locGps").classList.toggle("sel", m === "gps");
   document.getElementById("locMap").classList.toggle("sel", m === "map" || m === "keep");
-  document.getElementById("locMap").textContent = m === "keep" ? "🎯 Keep current pin" : "🎯 Map center";
+  document.getElementById("locPhoto").classList.toggle("sel", m === "photo");
+  document.getElementById("locMap").textContent = m === "keep" ? "🎯 Keep pin" : "🎯 Map center";
 }
 
 async function saveStep() {
@@ -452,7 +457,9 @@ async function saveStep() {
   const notes = document.getElementById("fNotes").value.trim();
 
   let lat, lng;
-  if (locMode === "gps") {
+  if (locMode === "photo" && pendingExif) {
+    ({ lat, lng } = pendingExif);
+  } else if (locMode === "gps") {
     try {
       const pos = await getPosition();
       lat = pos.coords.latitude; lng = pos.coords.longitude;
@@ -460,22 +467,51 @@ async function saveStep() {
       toast("GPS unavailable — using map center");
       ({ lat, lng } = map.getCenter());
     }
-  } else if (locMode === "map") {
-    ({ lat, lng } = map.getCenter());
-  } else { // keep
+  } else if (locMode === "keep") {
     const s = trip.steps.find(x => x.id === editingId);
     lat = s.lat; lng = s.lng;
+  } else { // map center
+    ({ lat, lng } = map.getCenter());
   }
 
+  let step;
   if (editingId) {
-    const s = trip.steps.find(x => x.id === editingId);
-    Object.assign(s, { title, date, notes, lat, lng, photos: pendingPhotos });
+    step = trip.steps.find(x => x.id === editingId);
+    Object.assign(step, { title, date, notes, lat, lng, photos: pendingPhotos });
+    delete step.weather; // location/date may have changed
   } else {
-    trip.steps.push({ id: String(Date.now()), title, date, notes, lat, lng, photos: pendingPhotos });
+    step = { id: String(Date.now()), title, date, notes, lat, lng, photos: pendingPhotos };
+    trip.steps.push(step);
   }
   save(); render(); closeStepModal();
   toast(editingId ? "Step updated ✓" : "Step added ✓");
   editingId = null;
+  fetchWeather(step);
+}
+
+/* ---------- Weather + sunset per step (Open-Meteo, free, no key) ---------- */
+const WMO = { 0:"☀️",1:"🌤",2:"⛅️",3:"☁️",45:"🌫",48:"🌫",51:"🌦",53:"🌦",55:"🌦",56:"🌦",57:"🌦",
+  61:"🌧",63:"🌧",65:"🌧",66:"🌧",67:"🌧",71:"🌨",73:"🌨",75:"🌨",77:"🌨",
+  80:"🌦",81:"🌧",82:"⛈",85:"🌨",86:"🌨",95:"⛈",96:"⛈",99:"⛈" };
+async function fetchWeather(step) {
+  if (!navigator.onLine || step.weather) return;
+  try {
+    const day = step.date.slice(0, 10);
+    const ageDays = (Date.now() - new Date(day)) / 86400000;
+    const host = ageDays > 85 ? "archive-api.open-meteo.com/v1/archive" : "api.open-meteo.com/v1/forecast";
+    const url = `https://${host}?latitude=${step.lat.toFixed(4)}&longitude=${step.lng.toFixed(4)}` +
+      `&daily=weather_code,temperature_2m_max,sunset&timezone=auto&start_date=${day}&end_date=${day}`;
+    const r = await fetch(url);
+    if (!r.ok) return;
+    const d = (await r.json()).daily;
+    if (!d || d.weather_code == null || d.weather_code[0] == null) return;
+    step.weather = {
+      icon: WMO[d.weather_code[0]] || "🌡",
+      tmax: Math.round(d.temperature_2m_max[0]),
+      sunset: String(d.sunset[0] || "").slice(11, 16)
+    };
+    save(); render();
+  } catch (e) {} // offline or API hiccup — retried on next app start
 }
 
 function deleteStep(id) {
@@ -491,9 +527,70 @@ function flyToStep(id) {
   map.flyTo([s.lat, s.lng], 14, { duration: .8 });
 }
 
+/* ---------- EXIF: read GPS from the photo file itself ---------- */
+async function photoExif(file) {
+  try {
+    const dv = new DataView(await file.slice(0, 262144).arrayBuffer());
+    if (dv.byteLength < 12 || dv.getUint16(0) !== 0xFFD8) return null; // JPEG only
+    let o = 2;
+    while (o + 4 <= dv.byteLength) {
+      if (dv.getUint8(o) !== 0xFF) break;
+      const marker = dv.getUint8(o + 1);
+      if (marker === 0xDA) break; // image data starts, no EXIF found
+      const size = dv.getUint16(o + 2);
+      if (marker === 0xE1 && dv.getUint32(o + 4) === 0x45786966) // "Exif"
+        return tiffGps(dv, o + 10);
+      o += 2 + size;
+    }
+  } catch (e) {}
+  return null;
+}
+function tiffGps(dv, base) {
+  const little = dv.getUint16(base) === 0x4949;
+  const u16 = o => dv.getUint16(base + o, little);
+  const u32 = o => dv.getUint32(base + o, little);
+  if (u16(2) !== 42) return null;
+  const ifd0 = u32(4);
+  let gps = 0;
+  for (let i = 0, n = u16(ifd0); i < n; i++) {
+    const e = ifd0 + 2 + i * 12;
+    if (u16(e) === 0x8825) { gps = u32(e + 8); break; } // GPS IFD pointer
+  }
+  if (!gps) return null;
+  const tags = {};
+  for (let i = 0, n = u16(gps); i < n; i++) {
+    const e = gps + 2 + i * 12;
+    const tag = u16(e);
+    if (tag === 1 || tag === 3) tags[tag] = String.fromCharCode(dv.getUint8(base + e + 8)); // N/S, E/W
+    if (tag === 2 || tag === 4) { // deg/min/sec rationals
+      const vo = u32(e + 8);
+      const rat = j => u32(vo + j * 8) / (u32(vo + j * 8 + 4) || 1);
+      tags[tag] = rat(0) + rat(1) / 60 + rat(2) / 3600;
+    }
+  }
+  if (typeof tags[2] !== "number" || typeof tags[4] !== "number") return null;
+  const lat = tags[2] * (tags[1] === "S" ? -1 : 1);
+  const lng = tags[4] * (tags[3] === "W" ? -1 : 1);
+  if (!isFinite(lat) || !isFinite(lng) || (lat === 0 && lng === 0)) return null;
+  return { lat, lng };
+}
+
 /* ---------- Photos ---------- */
-function addPhotos(input) {
-  [...input.files].forEach(file => {
+let pendingExif = null;
+async function addPhotos(input) {
+  const files = [...input.files];
+  if (!pendingExif) {
+    for (const f of files) {
+      pendingExif = await photoExif(f);
+      if (pendingExif) break;
+    }
+    if (pendingExif) {
+      document.getElementById("locPhoto").style.display = "";
+      setLocMode("photo");
+      toast("📷 Photo has a location — using it");
+    }
+  }
+  files.forEach(file => {
     const img = new Image();
     const url = URL.createObjectURL(file);
     img.onload = () => {
@@ -589,6 +686,87 @@ async function locateMe() {
   } catch (e) { toast("Couldn't get GPS — check location permission"); }
 }
 
+/* ---------- Share: self-contained read-only trip story ---------- */
+function buildShareHtml() {
+  const sorted = [...trip.steps].sort((a, b) => a.date.localeCompare(b.date));
+  const json = JSON.stringify({ steps: sorted, track: trip.track }).replace(/<\//g, "<\\/");
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>My Zanzibar Trip 🌴</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+ body{margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#fff;color:#1e2430}
+ #map{height:48vh}
+ .tl{max-width:640px;margin:0 auto;padding:18px 16px 40px}
+ h1{font-size:22px;margin:0}
+ .meta{color:#6b7280;font-size:14px;margin:6px 0 18px}
+ .card{background:#f6f7f9;border-radius:14px;padding:14px;margin-bottom:14px;position:relative}
+ .num{position:absolute;top:-8px;left:-4px;width:26px;height:26px;border-radius:50%;background:#e04148;color:#fff;font-size:13px;font-weight:700;display:flex;align-items:center;justify-content:center}
+ h3{margin:0;padding-left:14px;font-size:16px}
+ .date{color:#6b7280;font-size:12px;padding-left:14px;margin-top:2px}
+ .notes{font-size:14px;margin-top:8px;white-space:pre-wrap}
+ .ph{display:flex;gap:8px;overflow-x:auto;margin-top:10px}
+ .ph img{height:110px;border-radius:10px}
+ .step-marker{background:#e04148;color:#fff;border:3px solid #fff;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;box-shadow:0 2px 8px rgba(0,0,0,.35)}
+ @media (prefers-color-scheme:dark){body{background:#171b23;color:#edeff3}.card{background:#232936}.notes{color:#edeff3}}
+</style>
+</head>
+<body>
+<div id="map"></div>
+<div class="tl"><h1>My Zanzibar Trip 🌴</h1><div class="meta" id="meta"></div><div id="cards"></div></div>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"><\/script>
+<script>
+var TRIP=${json};
+function esc(s){return String(s).replace(/[&<>"']/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]})}
+function fd(s){return new Date(s).toLocaleString(undefined,{weekday:"short",day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"})}
+var map=L.map("map");
+L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19,attribution:"&copy; OpenStreetMap"}).addTo(map);
+var pts=[];
+TRIP.steps.forEach(function(s,i){
+ pts.push([s.lat,s.lng]);
+ L.marker([s.lat,s.lng],{icon:L.divIcon({className:"",iconSize:[30,30],iconAnchor:[15,15],html:'<div class="step-marker" style="width:30px;height:30px">'+(i+1)+'</div>'})}).addTo(map).bindPopup("<b>"+esc(s.title)+"</b>");
+});
+L.polyline(pts,{color:"#e04148",weight:4,opacity:.9}).addTo(map);
+if(TRIP.track&&TRIP.track.length)L.polyline(TRIP.track.map(function(p){return[p[0],p[1]]}),{color:"#e04148",weight:3,opacity:.5,dashArray:"2 8"}).addTo(map);
+if(pts.length)map.fitBounds(L.latLngBounds(pts).pad(.2));else map.setView([-6.1659,39.3621],10);
+function hav(a,b){var t=function(d){return d*Math.PI/180};var dl=t(b[0]-a[0]),dg=t(b[1]-a[1]);var h=Math.sin(dl/2)*Math.sin(dl/2)+Math.cos(t(a[0]))*Math.cos(t(b[0]))*Math.sin(dg/2)*Math.sin(dg/2);return 12742*Math.asin(Math.sqrt(h))}
+var km=0,tr=TRIP.track||[],i;
+for(i=1;i<tr.length;i++)km+=hav(tr[i-1],tr[i]);
+if(km<.5)for(i=1;i<pts.length;i++)km+=hav(pts[i-1],pts[i]);
+var days=TRIP.steps.length?Math.max(1,Math.round((new Date(TRIP.steps[TRIP.steps.length-1].date)-new Date(TRIP.steps[0].date))/864e5)+1):0;
+document.getElementById("meta").textContent=TRIP.steps.length+" steps · "+km.toFixed(0)+" km · "+days+" days";
+document.getElementById("cards").innerHTML=TRIP.steps.map(function(s,i){
+ return '<div class="card"><div class="num">'+(i+1)+'</div><h3>'+esc(s.title)+'</h3><div class="date">'+fd(s.date)+
+  (s.weather?" · "+s.weather.icon+" "+s.weather.tmax+"°C · 🌇 "+s.weather.sunset:"")+"</div>"+
+  (s.notes?'<div class="notes">'+esc(s.notes)+"</div>":"")+
+  (s.photos&&s.photos.length?'<div class="ph">'+s.photos.map(function(p){return '<img src="'+p+'" alt="">'}).join("")+"</div>":"")+"</div>";
+}).join("");
+<\/script>
+</body>
+</html>`;
+}
+async function shareTrip() {
+  toggleMenu();
+  if (!trip.steps.length) { toast("Add some steps first"); return; }
+  const html = buildShareHtml();
+  const file = new File([html], "my-zanzibar-trip.html", { type: "text/html" });
+  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    try {
+      await navigator.share({ files: [file], title: "My Zanzibar Trip" });
+      return;
+    } catch (e) { if (e.name === "AbortError") return; }
+  }
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([html], { type: "text/html" }));
+  a.download = "my-zanzibar-trip.html";
+  a.click();
+  URL.revokeObjectURL(a.href);
+  toast("Story downloaded — send the file to anyone");
+}
+
 /* ---------- Export / import ---------- */
 function exportTrip() {
   toggleMenu();
@@ -680,6 +858,7 @@ document.addEventListener("click", e => {
   render();
   if (trip.steps.length || trip.track.length) fitTrip();
   if (saved) saveNow(); // ensures data migrated from localStorage lands in IndexedDB
+  trip.steps.filter(s => !s.weather).forEach(fetchWeather); // backfill weather when online
 })();
 
 if ("serviceWorker" in navigator) {
