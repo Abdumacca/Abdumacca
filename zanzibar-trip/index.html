@@ -145,6 +145,7 @@
   .photo-add {
     border: 1.5px dashed #c8cdd5; border-radius: 10px; padding: 14px;
     text-align: center; color: var(--muted); font-size: 14px; cursor: pointer;
+    background: transparent; font-family: inherit;
   }
   .photo-previews { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
   .photo-previews .pp { position: relative; }
@@ -231,6 +232,7 @@
 
 <div class="fabs" id="fabs" style="bottom: 134px;">
   <button class="fab" onclick="locateMe()" title="My location">🧭</button>
+  <button class="fab" onclick="quickSnap()" title="Snap a photo">📷</button>
   <button class="fab primary" onclick="openStepModal()" title="Add step">＋</button>
 </div>
 
@@ -275,7 +277,11 @@
     </div>
     <div class="field">
       <label>Photos</label>
-      <div class="photo-add" onclick="document.getElementById('fPhotos').click()">📷 Tap to add photos</div>
+      <div class="loc-row">
+        <button class="photo-add" style="flex:1" onclick="document.getElementById('fCamera').click()">📷 Take photo</button>
+        <button class="photo-add" style="flex:1" onclick="document.getElementById('fPhotos').click()">🖼 Gallery</button>
+      </div>
+      <input type="file" id="fCamera" accept="image/*" capture="environment" style="display:none" onchange="addPhotos(this)">
       <input type="file" id="fPhotos" accept="image/*" multiple style="display:none" onchange="addPhotos(this)">
       <div class="photo-previews" id="photoPreviews"></div>
     </div>
@@ -518,6 +524,12 @@ function deleteStep(id) {
   if (!confirm("Delete this step and its photos?")) return;
   trip.steps = trip.steps.filter(s => s.id !== id);
   save(); render();
+}
+
+/* One tap from the map straight into the camera */
+function quickSnap() {
+  openStepModal();
+  document.getElementById("fCamera").click();
 }
 
 function flyToStep(id) {
