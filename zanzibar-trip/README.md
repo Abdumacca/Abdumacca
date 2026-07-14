@@ -12,6 +12,7 @@ All data (steps, photos, GPS trail) is stored **on your phone** in IndexedDB.
 - 📍 **Track** button records your GPS trail (points logged every ~30 m) and keeps
   the screen awake while tracking so recording doesn't stop
 - ➕ Add **steps** (stops) with a title, date, notes, and photos — pinned to your current GPS position, the map center, or the **photo's own geotag** (read from the picture's EXIF data)
+- 📸 **Take photos in-app** — a camera button on the map opens your phone camera and drops the shot straight into a new step; the step form also offers Camera / Gallery
 - 🌤 **Weather & sunset per step** — fetched automatically from Open-Meteo (free, no key) for each step's date and location
 - 🧵 Route line drawn through your steps, dashed line for the raw GPS trail
 - ▶️ **Relive trip** — the map flies through your steps in order
