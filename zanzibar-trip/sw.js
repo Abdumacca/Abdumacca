@@ -1,5 +1,6 @@
-/* Service worker: offline app shell + map tile caching */
-const SHELL = "zanzibar-shell-v1";
+/* Service worker: offline app shell + map tile caching.
+   Bump SHELL version on every release so clients refresh the shell. */
+const SHELL = "zanzibar-shell-v2";
 const TILES = "zanzibar-tiles-v1";
 const TILE_LIMIT = 2000; // ~2k tiles ≈ 30-60 MB, plenty for the island at several zooms
 
@@ -46,19 +47,25 @@ self.addEventListener("fetch", e => {
     return;
   }
 
-  // App shell + CDN libs: stale-while-revalidate
+  // App shell + CDN libs: stale-while-revalidate.
+  // cache:"no-cache" makes the background refresh revalidate with the server
+  // instead of being satisfied by the HTTP cache, so updates actually land.
   const isShell = url.origin === location.origin || url.hostname === "unpkg.com";
   if (isShell) {
     e.respondWith(
       caches.open(SHELL).then(async cache => {
         const hit = await cache.match(e.request);
-        const fetching = fetch(e.request)
+        const fetching = fetch(e.request, { cache: "no-cache" })
           .then(resp => { if (resp.ok) cache.put(e.request, resp.clone()); return resp; })
           .catch(() => hit);
         return hit || fetching;
       })
     );
   }
+});
+
+self.addEventListener("message", e => {
+  if (e.data === "SKIP_WAITING") self.skipWaiting();
 });
 
 let trimming = false;

@@ -227,6 +227,8 @@
   <button onclick="relive()">▶️ Relive trip</button>
   <button onclick="shareTrip()">📤 Share trip story</button>
   <button onclick="clearTrack()">🧹 Clear GPS trail</button>
+  <button onclick="forceUpdate()">🔄 Update app</button>
+  <div id="verLabel" style="padding:6px 16px 10px;font-size:12px;color:var(--muted)"></div>
 </div>
 <input type="file" id="importFile" accept=".json,application/json" style="display:none" onchange="importTrip(this)">
 
@@ -298,7 +300,9 @@
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 "use strict";
+const APP_VERSION = "2.0"; // bump on every release, together with SHELL in sw.js
 const STORE_KEY = "zanzibar-trip-v1";
+document.getElementById("verLabel").textContent = "version " + APP_VERSION;
 
 /* ---------- State (IndexedDB, with legacy localStorage migration) ---------- */
 let trip = { steps: [], track: [] };
@@ -873,8 +877,38 @@ document.addEventListener("click", e => {
   trip.steps.filter(s => !s.weather).forEach(fetchWeather); // backfill weather when online
 })();
 
+/* ---------- Updates ---------- */
+async function forceUpdate() {
+  toggleMenu();
+  toast("Updating…");
+  try {
+    const keys = await caches.keys();
+    await Promise.all(keys.filter(k => k.startsWith("zanzibar-shell")).map(k => caches.delete(k)));
+    const reg = await navigator.serviceWorker.getRegistration();
+    if (reg) await reg.update();
+  } catch (e) {}
+  setTimeout(() => location.reload(), 700);
+}
+
 if ("serviceWorker" in navigator) {
-  navigator.serviceWorker.register("sw.js").catch(e => console.warn("SW registration failed", e));
+  navigator.serviceWorker.register("sw.js").then(reg => {
+    reg.update(); // check for a new version on every launch
+    reg.addEventListener("updatefound", () => {
+      const w = reg.installing;
+      if (!w) return;
+      w.addEventListener("statechange", () => {
+        if (w.state === "activated" && navigator.serviceWorker.controller) {
+          // restart into the new version, unless the user is mid-something
+          if (watchId === null && !document.querySelector(".modal-wrap.open")) {
+            toast("✨ Update installed — restarting…");
+            setTimeout(() => location.reload(), 1200);
+          } else {
+            toast("✨ Update ready — will apply next launch");
+          }
+        }
+      });
+    });
+  }).catch(e => console.warn("SW registration failed", e));
 }
 </script>
 </body>
